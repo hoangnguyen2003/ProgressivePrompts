@@ -263,6 +263,19 @@ class T5Dataset:
                 good_id = np.load('good_id_yahoo_test.npy')
                 dataset = dataset.select(good_id)
         
+        
+        
+        
+        ###########################################################
+        if split == 'train':
+            dataset = dataset.shuffle(seed=42)
+            dataset = dataset.select(np.arange(min(len(dataset), 25000)))
+        ###########################################################     
+        
+        
+        
+        
+        
         # Using Lester et al. setting for WSC task, e.g.
         # using only positive samples (for output generation)
         if self.task == 'wsc': 

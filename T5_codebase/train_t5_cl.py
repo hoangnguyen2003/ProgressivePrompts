@@ -29,7 +29,8 @@ def main(args):
                                            mlp_layer_norm=args.mlp_layer_norm==1,
                                            bottleneck_size=args.bottleneck_size,
                                            get_test_subset=args.get_test_subset==1,
-                                           memory_perc=args.memory_perc
+                                           memory_perc=args.memory_perc,
+                                           continue_train=args.continue_train==1
                                            )
     if args.get_test_subset==0:
         print("Not creating test subset")
@@ -227,6 +228,13 @@ if __name__ == "__main__":
         type=int,
         help='MLP bottleneck size',
         default=800
+    )
+    
+    parser.add_argument(
+        '--continue_train',
+        type=int,
+        help='Whether to continue train (0 - False, 1 - True)',
+        default=0
     )
 
     main(parser.parse_args())

@@ -92,6 +92,7 @@ class T5ContinualLearner:
                  weight_decay_mlp=None,
                  get_test_subset=True,
                  memory_perc=0.0,
+                 continue_train=False,
                  ):
         
         """Class for CL & prompt tuning experiments with T5 model.
@@ -238,6 +239,9 @@ class T5ContinualLearner:
         self.get_test_subset = get_test_subset
         self.tasks_data_dict = self.get_tasks_data_dict(memory_perc=memory_perc)
 
+        self.continue_train = continue_train
+        if self.continue_train:
+            self.checkpoint = torch.load("./load_checkpoint/current_checkpoint.ptrom")
 
     # Create optimizer 
     def get_optimizer(self, lr, weight_decay,
@@ -581,25 +585,25 @@ class T5ContinualLearner:
             else: # full model fine tuning, no prompt added
                 source_mask_updated = batch["source_mask"]
 
+            with torch.no_grad():
+                encoder_outputs = model.encoder(
+                                        attention_mask=source_mask_updated,
+                                        inputs_embeds=inputs_embeds,
+                                        head_mask=None,  
+                                        output_attentions=None, 
+                                        output_hidden_states=None,  
+                                        return_dict=None, 
+                                    )
 
-            encoder_outputs = model.encoder(
-                                    attention_mask=source_mask_updated,
-                                    inputs_embeds=inputs_embeds,
-                                    head_mask=None,  
-                                    output_attentions=None, 
-                                    output_hidden_states=None,  
-                                    return_dict=None, 
-                                )
-
-            outs = model.generate(
-                input_ids=batch["source_ids"],
-                attention_mask=source_mask_updated,
-                encoder_outputs=encoder_outputs,
-                max_length=max_length,
-            )
-            dec = [tokenizer.decode(ids) for ids in outs]
-            texts = [tokenizer.decode(ids) for ids in batch['source_ids']]
-            targets = [tokenizer.decode(ids) for ids in batch['target_ids']]
+                outs = model.generate(
+                    input_ids=batch["source_ids"],
+                    attention_mask=source_mask_updated,
+                    encoder_outputs=encoder_outputs,
+                    max_length=max_length,
+                )
+                dec = [tokenizer.decode(ids) for ids in outs]
+                texts = [tokenizer.decode(ids) for ids in batch['source_ids']]
+                targets = [tokenizer.decode(ids) for ids in batch['target_ids']]
 
             if task in ['stsb', 'cola', 'cb', 'multirc']:
                 row_true = [self.normalize_text(x) for x in targets]
@@ -710,12 +714,14 @@ class T5ContinualLearner:
     
     # Perform training on a single task
     def train_one_task(self,
+                       num,
                        task,
                        epochs=40,
                        progressive=True,
                        eval_every_N=1,
                        eval_on_all_tasks=False,
-                       data_replay_freq=-1):
+                       data_replay_freq=-1,
+                       results_dict={}):
 
         print('task = ', task)
         if progressive:
@@ -744,7 +750,15 @@ class T5ContinualLearner:
 
         val_acc = []
 
-        for epoch in range(epochs):
+        start_epochs = 0
+        if self.continue_train and num == self.checkpoint['num']:
+            start_epochs = self.checkpoint['epoch']
+            val_acc = self.checkpoint['val_acc']
+            model.load_state_dict(self.checkpoint['state_dict'])
+            self.optimizer.load_state_dict(self.checkpoint['optimizer'])
+            self.best_acc = self.checkpoint['best_acc']
+
+        for epoch in range(start_epochs, epochs):
             print(epoch)
             model.train()
             if self.prefix_MLPs!=None:
@@ -809,7 +823,20 @@ class T5ContinualLearner:
                 if self.early_stopping:
                     self.update_best_model(acc, task=task)
                 print(epoch, task, '->', val_acc[-1])
-
+            
+            checkpoint = {
+                "num": num,
+                "epoch": epoch + 1,
+                "val_acc": val_acc,
+                "state_dict": model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "best_acc": self.best_acc,
+                "best_prompt": self.best_prompt,
+                "previous_prompts": self.previous_prompts,
+                "results_dict": results_dict,
+            }
+            torch.save(checkpoint, "./save_checkpoint/current_checkpoint.pt")        
+            
         if progressive:
             self.progress_previous_prompts(task=task)
 
@@ -833,15 +860,23 @@ class T5ContinualLearner:
         results_dict = {}
         if self.get_test_subset: results_dict['test'] = {}
 
+        if self.continue_train:
+            self.best_prompt = self.checkpoint['best_prompt']
+            self.previous_prompts = self.checkpoint['previous_prompts']
+            results_dict = self.checkpoint['results_dict']
+
         for num, task in enumerate(task_list):
+            if self.continue_train and num < self.checkpoint['num']:
+                continue
             eval_on_all_tasks = False if progressive or len(task_list)==1 else True
             eval_frq = eval_every_N if not eval_on_all_tasks else int(epochs//3)
-            val_acc = self.train_one_task(task, epochs,
+            val_acc = self.train_one_task(num, task, epochs,
                                           progressive=progressive,
                                           eval_every_N=eval_frq,
                                           #eval_on_all_tasks=False, # too slow
                                           data_replay_freq=data_replay_freq,
                                           eval_on_all_tasks=eval_on_all_tasks,
+                                          results_dict=results_dict,
                                           )
             print(task, val_acc)
             results_dict[task] = val_acc
