@@ -241,7 +241,7 @@ class T5ContinualLearner:
 
         self.continue_train = continue_train
         if self.continue_train:
-            self.checkpoint = torch.load("./load_checkpoint/current_checkpoint.ptrom")
+            self.checkpoint = torch.load("./load_checkpoint/current_checkpoint.pt")
 
     # Create optimizer 
     def get_optimizer(self, lr, weight_decay,
