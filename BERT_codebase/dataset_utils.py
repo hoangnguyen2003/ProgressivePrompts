@@ -257,7 +257,7 @@ class Dataset:
         ###########################################################
         if split == 'train':
             dataset = dataset.shuffle(seed=42)
-            dataset = dataset.select(np.arange(min(len(dataset), 25000)))
+            dataset = dataset.select(np.arange(min(len(dataset), 20000)))
         ###########################################################     
 
 
