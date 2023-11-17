@@ -90,6 +90,7 @@ class ContinualLearner:
                  do_repeats=False, # default setting is without repeats
                  bottleneck_size=800, # bottleneck size in case of using MLP reparametrization
                  same_prompt=False,
+                 continue_train=False,
                  ):
 
         self.task_to_num_labels = {
@@ -181,6 +182,10 @@ class ContinualLearner:
             self.best_acc = 0.0 # best avg accuracy on seen tasks
         self.tokenizer = self.trainer.tokenizer
         self.tasks_data_dict = self.get_tasks_data_dict(self.select_k_per_class, memory_perc=self.memory_perc)
+
+        self.continue_train = continue_train
+        if self.continue_train:
+            self.checkpoint = torch.load("./load_checkpoint/current_checkpoint.pt")
 
 
     def get_tasks_data_dict(self, k, memory_perc=0):
@@ -362,10 +367,12 @@ class ContinualLearner:
 
 
     def train_on_one_task(self,
+                          num,
                           task,
                           data_replay_freq = -1, # if -1 no data replay, else replay after N samples
                           prompt_tuning = True,
-                          num_epochs = 5):
+                          num_epochs = 5,
+                          results_dict={}):
         self.best_acc = 0.0 # our baseline accuracy is 0
         val_scores = {x: [] for x in list(self.tasks_data_dict)}
         device = self.device
@@ -381,7 +388,14 @@ class ContinualLearner:
         else:
             task_id = None # we do not need task id for eval in case of regular fine-tuning
 
-        for epoch in range(num_epochs):
+        start_epochs = 0
+        if self.continue_train and num == self.checkpoint['i']:
+            start_epochs = self.checkpoint['epoch']
+            val_scores = self.checkpoint['val_scores']
+            self.best_model = self.checkpoint['best_model']
+            self.best_acc = self.checkpoint['best_acc']
+
+        for epoch in range(start_epochs, num_epochs):
             print(epoch)
             self.trainer.model.train().to(device)
             if self.prefix_len>0 and self.trainer.prefix_MLPs != None:
@@ -411,6 +425,25 @@ class ContinualLearner:
             val_scores = self.eval_on_tasks(val_scores, split='val', prompt_tuning=prompt_tuning, original_task_id=task_id, tasks_to_eval=[task])
             if self.early_stopping:
                 self.update_best_model(task, val_scores, tasks_to_eval=[task]) # update best model based on curr task acc improvement
+            
+
+            checkpoint = {
+                "i": num,
+                "epoch": epoch + 1,
+                "val_scores": val_scores,
+                "best_model": self.best_model,
+                "best_acc": self.best_acc,
+                "results_dict": results_dict,
+                "model": self.trainer.model.state_dict(),
+                "optimizer": self.trainer.optimizer.state_dict(),
+                "scheduler": self.trainer.scheduler.state_dict(),
+                "saved_embs": self.trainer.saved_embs,
+            }
+            for ttttt in self.task_list:
+                checkpoint[ttttt] = self.trainer.prefix_MLPs[ttttt].state_dict()
+            torch.save(checkpoint, "./save_checkpoint/current_checkpoint.pt")
+
+
 
         return val_scores
 
@@ -433,14 +466,27 @@ class ContinualLearner:
             cl_params = ['head']
 
         for i, task in enumerate(self.task_list):
+            if self.continue_train and i < self.checkpoint['i']:
+                continue
+
             self.trainer.freeze_unfreeze_mlps([x for x in self.task_list if x!=task], blocks=cl_params, requires_grad=False) # freezing MLPs & head for all tasks
             self.trainer.freeze_unfreeze_mlps([task], blocks=cl_params, requires_grad=True) # unfreezing current task MLP & head
 
+            if self.continue_train and i == self.checkpoint['i']:
+                results_dict = self.checkpoint['results_dict']
+                self.trainer.model.load_state_dict(self.checkpoint['model'])
+                self.trainer.optimizer.load_state_dict(self.checkpoint['optimizer'])
+                self.trainer.scheduler.load_state_dict(self.checkpoint['scheduler'])
+                self.trainer.saved_embs = self.checkpoint['saved_embs']
+                for ttttt in self.task_list:
+                    self.trainer.prefix_MLPs[ttttt].load_state_dict(self.checkpoint[ttttt])
+
             print('\n\nTASK ', task)
-            val_scores = self.train_on_one_task(task,
+            val_scores = self.train_on_one_task(i, task,
                                                 num_epochs=num_epochs,
                                                 data_replay_freq=data_replay_freq,
-                                                prompt_tuning=prompt_tuning)
+                                                prompt_tuning=prompt_tuning,
+                                                results_dict=results_dict)
             results_dict[i] = val_scores
             # loading the best model across all epochs (based on val acc)
             # in case of early stopping

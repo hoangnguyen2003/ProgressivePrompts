@@ -253,6 +253,14 @@ class Dataset:
                 good_id = np.load('good_id_yahoo_test.npy')
                 dataset = dataset.select(good_id)
 
+
+        ###########################################################
+        if split == 'train':
+            dataset = dataset.shuffle(seed=42)
+            dataset = dataset.select(np.arange(min(len(dataset), 1800)))
+        ###########################################################     
+
+
         dataset = dataset.shuffle(seed=seed)
 
         if select_k_per_class != -1 and task not in ['copa', 'cb', 'wic']:

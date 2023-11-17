@@ -35,6 +35,7 @@ def main(args):
                                                              bottleneck_size=args.bottleneck_size,
                                                              do_repeats= args.do_repeats==1,
                                                              same_prompt=args.same_prompt==1,
+                                                             continue_train=args.continue_train==1,
                                                             )
 
 
@@ -316,6 +317,13 @@ if __name__ == "__main__":
         '--disen',
         type=int,
         help='Perform IDBR training (disentanglement)',
+        default=0
+    )
+
+    parser.add_argument(
+        '--continue_train',
+        type=int,
+        help='Whether to continue train (0 - False, 1 - True)',
         default=0
     )
 
