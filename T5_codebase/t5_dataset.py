@@ -267,9 +267,9 @@ class T5Dataset:
         
         
         ###########################################################
-        if split == 'train':
-            dataset = dataset.shuffle(seed=42)
-            dataset = dataset.select(np.arange(min(len(dataset), 25000)))
+        # if split == 'train':
+        #     dataset = dataset.shuffle(seed=42)
+        #     dataset = dataset.select(np.arange(min(len(dataset), 25000)))
         ###########################################################     
         
         
